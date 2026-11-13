@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Báo cháy gia đình - Lab 3</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#e9eef2;--ink:#14212b;--mut:#5c6b77;--panel:#fff;--line:#c9d3db;
+  --ok:#1f7a5a;--warn:#d98a0b;--bad:#c8261b;--acc:#1f5f99;--track:#e1e8ee;
+  --shadow:0 1px 2px rgba(20,33,43,.06),0 6px 18px rgba(20,33,43,.06);
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0f1820;--ink:#e6edf2;--mut:#8fa1ae;--panel:#17232d;--line:#2b3b48;
+  --ok:#4cc79a;--warn:#f2b441;--bad:#ff5a4d;--acc:#6db3f2;--track:#243442;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 18px rgba(0,0,0,.25);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "IBM Plex Sans",sans-serif;transition:background .4s}
+body.alarm{background:color-mix(in srgb,var(--bad) 9%,var(--bg))}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+svg{display:block}
+
+/* ---------- Banner ---------- */
+.banner{position:relative;overflow:hidden;display:flex;align-items:center;gap:22px;border-radius:14px;padding:26px 28px;color:#fff;
+  background:linear-gradient(120deg,#1f7a5a,#2fa37a);box-shadow:var(--shadow);transition:background .4s}
+.banner.wait{background:linear-gradient(120deg,#4b5d6b,#6a7f8f)}
+.banner.alarm{background:linear-gradient(120deg,#a81a10,#e2402f);animation:shake .5s 2}
+.banner::before,.banner::after{content:"";position:absolute;right:48px;top:50%;width:90px;height:90px;margin:-45px -45px 0 0;
+  border-radius:50%;border:2px solid rgba(255,255,255,.45);opacity:0;pointer-events:none}
+.banner.alarm::before{animation:ripple 1.8s ease-out infinite}
+.banner.alarm::after{animation:ripple 1.8s ease-out .9s infinite}
+.banner-icon{flex:none;width:76px;height:76px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;z-index:1}
+.banner-icon svg{width:44px;height:44px}
+.banner.alarm .banner-icon{animation:beat .6s ease-in-out infinite}
+.banner-text{z-index:1;min-width:0}
+.banner h1{margin:0;font:600 clamp(2rem,6vw,3.4rem)/1.1 "IBM Plex Sans Condensed",sans-serif}
+.banner p{margin:6px 0 0;opacity:.92;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dot{width:10px;height:10px;border-radius:50%;background:#ffd166;flex:none}
+.dot.live{background:#7dffc4;animation:blink 2s ease-in-out infinite}
+.dot.off{background:#ffb4ab}
+.banner-icon .ico-flame,.banner-icon .ico-wait{display:none}
+.banner.alarm .ico-flame{display:block}.banner.alarm .ico-shield{display:none}
+.banner.wait .ico-wait{display:block}.banner.wait .ico-shield{display:none}
+
+/* ---------- Panels ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);
+  opacity:0;transform:translateY(12px);animation:rise .6s ease forwards}
+.grid .panel:nth-child(2){animation-delay:.08s}
+.panel.hot-panel{border-color:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent),var(--shadow)}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel h2{margin:0;font-size:1rem;font-weight:400;color:var(--mut);display:flex;align-items:center;gap:8px}
+.panel h2 svg{width:20px;height:20px;flex:none}
+.badge{font-size:.78rem;font-weight:600;padding:2px 10px;border-radius:99px;color:#fff;background:var(--ok);transition:background .3s}
+.badge.warn{background:var(--warn)}.badge.bad{background:var(--bad)}
+
+/* Gauge */
+.gauge{position:relative;width:min(100%,260px);margin:6px auto 0}
+.gauge svg{width:100%;height:auto;overflow:visible}
+.g-track,.g-fill{fill:none;stroke-width:14;stroke-linecap:round}
+.g-track{stroke:var(--track)}
+.g-fill{stroke:var(--ok);transition:stroke-dasharray .9s cubic-bezier(.2,.8,.2,1),stroke .4s}
+.g-fill.warn{stroke:var(--warn)}.g-fill.bad{stroke:var(--bad)}
+.g-tick{stroke:var(--ink);stroke-width:2.5;stroke-linecap:round;opacity:.7}
+.gauge-val{position:absolute;left:0;right:0;bottom:2px;text-align:center}
+.value{font:600 2.6rem/1.1 "IBM Plex Sans Condensed",sans-serif;font-variant-numeric:tabular-nums;transition:color .3s}
+.value small{font-size:1rem;color:var(--mut);margin-left:4px}
+.hot{color:var(--bad)}
+.value.bump{animation:bump .45s ease}
+.thr{text-align:center;color:var(--mut);font-size:.85rem;margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.stat{background:var(--bg);border-radius:8px;padding:6px 10px;text-align:center}
+.stat span{display:block;font-size:.72rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.stat b{font-variant-numeric:tabular-nums}
+.chart-box{position:relative;height:170px;margin-top:12px}
+
+/* Thiết bị */
+.devices{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px}
+.dev{border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;transition:border-color .3s,background .3s}
+.dev.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 9%,var(--panel))}
+.dev svg{width:76px;height:76px;margin:0 auto 6px;color:var(--mut);transition:color .3s}
+.dev.on svg{color:var(--acc)}
+.dev-name{font-weight:600}
+.dev-state{color:var(--mut);font-size:.85rem;margin-bottom:10px}
+.fan-blades{transform-origin:50px 50px}
+.dev.on .fan-blades{animation:spin .7s linear infinite}
+.drop{opacity:0}
+.dev.on .drop{animation:drip 1.1s ease-in infinite}
+.dev.on .drop:nth-child(2){animation-delay:.37s}.dev.on .drop:nth-child(3){animation-delay:.74s}
+.buzz-wave{opacity:0}
+.dev.on .buzz-wave{animation:wave 1s ease-out infinite}
+.dev.on .buzz-wave:nth-of-type(2){animation-delay:.33s}
+.dev.alarm-on svg{color:var(--bad)}
+.dev.alarm-on{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 9%,var(--panel))}
+
+button{font:inherit;padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;
+  transition:transform .12s,background .2s,border-color .2s,color .2s}
+button:hover{border-color:var(--acc)}
+button:active{transform:scale(.96)}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.dev button{width:100%}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.mode{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--mut)}
+.mode b{padding:2px 12px;border-radius:99px;background:var(--bg);color:var(--ink)}
+.mode b.manual{background:var(--warn);color:#1a1200}
+
+/* Nhật ký */
+.log{list-style:none;margin:10px 0 0;padding:0;max-height:220px;overflow:auto}
+.log li{display:flex;gap:12px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);animation:slide .4s ease}
+.log li:last-child{border-bottom:0}
+.log time{color:var(--mut);font-variant-numeric:tabular-nums;font-size:.85rem;flex:none}
+.log li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--acc);flex:none;align-self:center}
+.log li.bad::before{background:var(--bad)}.log li.ok::before{background:var(--ok)}.log li.warn::before{background:var(--warn)}
+.log .empty::before{display:none}
+.foot{margin-top:16px;display:flex;justify-content:flex-end}
+.foot button{min-width:0;font-size:.85rem;color:var(--mut)}
+
+/* ---------- Animations ---------- */
+@keyframes rise{to{opacity:1;transform:none}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes drip{0%{opacity:0;transform:translateY(-6px)}25%{opacity:1}100%{opacity:0;transform:translateY(14px)}}
+@keyframes wave{0%{opacity:.9;transform:scale(.7)}100%{opacity:0;transform:scale(1.25)}}
+@keyframes ripple{0%{opacity:.7;transform:scale(.6)}100%{opacity:0;transform:scale(5)}}
+@keyframes beat{50%{transform:scale(1.12)}}
+@keyframes blink{50%{opacity:.35}}
+@keyframes bump{40%{transform:scale(1.12)}}
+@keyframes slide{from{opacity:0;transform:translateX(-10px)}}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.panel{opacity:1;transform:none}}
+@media(max-width:520px){.banner{padding:20px 18px;gap:14px}.banner-icon{width:56px;height:56px}.banner-icon svg{width:32px;height:32px}}
+</style>
+</head>
+<body>
+<main>
+  <section class="banner wait" id="banner">
+    <div class="banner-icon" aria-hidden="true">
+      <svg class="ico-shield" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>
+      <svg class="ico-flame" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c.6 3.2-1.4 4.6-2.8 6.4C7.8 10.200 7 11.700 7 13.500a5 5 0 0 0 10 0c0-2-.9-3.300-1.800-4.500-.3 1.300-.9 2-1.700 2.300C14.300 8 13.600 4.500 12 2z"/></svg>
+      <svg class="ico-wait" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    </div>
+    <div class="banner-text">
+      <h1 id="stateText">Đang chờ dữ liệu</h1>
+      <p><span class="dot" id="dot"></span><span id="connText">Đang kết nối tới broker…</span></p>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="panel" id="panelGas">
+      <div class="panel-head">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9c3-3 5 3 8 0s5 3 8 0M4 15c3-3 5 3 8 0s5 3 8 0"/></svg>Nồng độ khí gas / khói</h2>
+        <span class="badge" id="badgeGas">An toàn</span>
+      </div>
+      <div class="gauge">
+        <svg viewBox="0 0 200 112"><path class="g-track" d="M20 100 A80 80 0 0 1 180 100" pathLength="100"/>
+          <path class="g-fill" id="gGas" d="M20 100 A80 80 0 0 1 180 100" pathLength="100" stroke-dasharray="0 100"/>
+          <line class="g-tick" id="tGas"/></svg>
+        <div class="gauge-val"><div class="value"><span class="gas-value">--</span><small>ppm</small></div></div>
+      </div>
+      <div class="thr">Ngưỡng báo động: 3000 ppm</div>
+      <div class="stats"><div class="stat"><span>Thấp nhất</span><b id="minGas">--</b></div><div class="stat"><span>Trung bình</span><b id="avgGas">--</b></div><div class="stat"><span>Cao nhất</span><b id="maxGas">--</b></div></div>
+      <div class="chart-box"><canvas id="chartGas"></canvas></div>
+    </div>
+
+    <div class="panel" id="panelTemp">
+      <div class="panel-head">
+        <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/></svg>Nhiệt độ</h2>
+        <span class="badge" id="badgeTemp">An toàn</span>
+      </div>
+      <div class="gauge">
+        <svg viewBox="0 0 200 112"><path class="g-track" d="M20 100 A80 80 0 0 1 180 100" pathLength="100"/>
+          <path class="g-fill" id="gTemp" d="M20 100 A80 80 0 0 1 180 100" pathLength="100" stroke-dasharray="0 100"/>
+          <line class="g-tick" id="tTemp"/></svg>
+        <div class="gauge-val"><div class="value"><span class="temp-value">--</span><small>°C</small></div></div>
+      </div>
+      <div class="thr">Ngưỡng báo động: 50 °C</div>
+      <div class="stats"><div class="stat"><span>Thấp nhất</span><b id="minTemp">--</b></div><div class="stat"><span>Trung bình</span><b id="avgTemp">--</b></div><div class="stat"><span>Cao nhất</span><b id="maxTemp">--</b></div></div>
+      <div class="chart-box"><canvas id="chartTemp"></canvas></div>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px;animation-delay:.16s">
+    <div class="panel-head"><h2>Thiết bị điều khiển</h2></div>
+    <div class="devices">
+      <div class="dev" id="devFan">
+        <svg viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="3" opacity=".35"/>
+          <g class="fan-blades"><path d="M50 50C40 30 44 12 56 14 66 16 62 36 50 50z"/><path d="M50 50C70 40 88 44 86 56 84 66 64 62 50 50z"/><path d="M50 50C60 70 56 88 44 86 34 84 38 64 50 50z"/><path d="M50 50C30 60 12 56 14 44 16 34 36 38 50 50z"/></g>
+          <circle cx="50" cy="50" r="6" fill="var(--panel)"/></svg>
+        <div class="dev-name">Quạt hút</div><div class="dev-state" id="fanState">Tắt</div>
+        <button id="btnFan">Quạt: tắt</button>
+      </div>
+      <div class="dev" id="devPump">
+        <svg viewBox="0 0 100 100" fill="currentColor"><path d="M50 8C36 28 24 40 24 56a26 26 0 0 0 52 0C76 40 64 28 50 8z" opacity=".25"/>
+          <path d="M50 8C36 28 24 40 24 56a26 26 0 0 0 52 0C76 40 64 28 50 8z" fill="none" stroke="currentColor" stroke-width="3"/>
+          <g><circle class="drop" cx="40" cy="52" r="4"/><circle class="drop" cx="52" cy="46" r="4"/><circle class="drop" cx="60" cy="58" r="4"/></g>
+          <path d="M34 66q8 6 16 0t16 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <div class="dev-name">Máy bơm</div><div class="dev-state" id="pumpState">Tắt</div>
+        <button id="btnPump">Máy bơm: tắt</button>
+      </div>
+      <div class="dev" id="devBuzz">
+        <svg viewBox="0 0 100 100" fill="currentColor"><path d="M22 40h14l20-16v52L36 60H22z"/>
+          <path class="buzz-wave" d="M66 38q12 12 0 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" style="transform-origin:66px 50px"/>
+          <path class="buzz-wave" d="M76 28q22 22 0 44" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" style="transform-origin:76px 50px"/></svg>
+        <div class="dev-name">Còi báo động</div><div class="dev-state" id="buzzState">Im lặng</div>
+        <button disabled style="opacity:.5;cursor:default">Tự động theo cảnh báo</button>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="btnAuto">Trả về tự động</button>
+      <span class="mode">Chế độ: <b class="mode-value">--</b></span>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px;animation-delay:.24s">
+    <div class="panel-head"><h2>Nhật ký sự kiện</h2></div>
+    <ul class="log" id="log"><li class="empty"><time>--:--:--</time><span>Chưa có sự kiện nào.</span></li></ul>
+  </section>
+
+  <div class="foot"><button id="btnDemo">Chạy thử (không cần ESP32)</button></div>
+</main>
+
+<script>
+// ĐỔI cho trùng với TOPIC trong code ESP32
+const PREFIX = "Nguyen Dang Tuyen-231432390/firealarm";
+const BROKER = "wss://broker.hivemq.com:8884/mqtt"; // MQTT qua WebSocket (trình duyệt không dùng được port 1883)
+
+const GAS_MAX = 10000, GAS_THR = 3000;   // phải khớp với ESP32 (map 200..10000, GAS_THRESHOLD)
+const TEMP_MAX = 80,  TEMP_THR = 50;     // DHT22 đo tối đa ~80 °C, TEMP_THRESHOLD
+
+const $ = s => document.querySelector(s);
+const state = { fan:false, pump:false, alarm:null, mode:null };
+const tr = new Map();                    // trạng thái animate số
+const hist = { gas:[], temp:[] };
+let demo = null;
+
+/* ---------- Tiện ích ---------- */
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const clock = () => new Date().toLocaleTimeString("vi-VN");
+
+function animateNumber(el, to, decimals){
+  const from = tr.has(el) ? tr.get(el) : to;
+  tr.set(el, to);
+  const t0 = performance.now(), dur = 700;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = (from + (to - from) * e).toFixed(decimals);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  const v = el.closest(".value"); v.classList.remove("bump"); void v.offsetWidth; v.classList.add("bump");
+}
+
+function placeTick(id, frac){
+  const a = Math.PI * (1 - frac), cx = 100, cy = 100;
+  const p = r => [cx + r * Math.cos(a), cy - r * Math.sin(a)];
+  const [x1,y1] = p(70), [x2,y2] = p(90), l = $(id);
+  l.setAttribute("x1",x1); l.setAttribute("y1",y1); l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+}
+placeTick("#tGas", GAS_THR / GAS_MAX);
+placeTick("#tTemp", TEMP_THR / TEMP_MAX);
+
+function level(v, thr){ return v > thr ? "bad" : v > thr * 0.7 ? "warn" : "ok"; }
+const LABEL = { ok:"An toàn", warn:"Cần chú ý", bad:"Vượt ngưỡng" };
+
+function updateGauge(key, v, max, thr, decimals){
+  const lv = level(v, thr);
+  const g = $("#g" + key), b = $("#badge" + key);
+  g.setAttribute("stroke-dasharray", (Math.max(0, Math.min(1, v / max)) * 100) + " 100");
+  g.setAttribute("class", "g-fill " + (lv === "ok" ? "" : lv));
+  b.className = "badge " + (lv === "ok" ? "" : lv); b.textContent = LABEL[lv];
+  $("#panel" + key).classList.toggle("hot-panel", lv === "bad");
+  const arr = hist[key.toLowerCase()]; arr.push(v); if (arr.length > 30) arr.shift();
+  $("#min" + key).textContent = Math.min(...arr).toFixed(decimals);
+  $("#max" + key).textContent = Math.max(...arr).toFixed(decimals);
+  $("#avg" + key).textContent = (arr.reduce((a,c) => a + c, 0) / arr.length).toFixed(decimals);
+}
+
+function logEvent(text, cls){
+  const ul = $("#log");
+  ul.querySelector(".empty")?.remove();
+  const li = document.createElement("li");
+  li.className = cls || "";
+  li.innerHTML = "<time>" + clock() + "</time><span></span>";
+  li.lastChild.textContent = text;
+  ul.prepend(li);
+  while (ul.children.length > 30) ul.lastChild.remove();
+}
+
+/* ---------- Biểu đồ ---------- */
+function makeChart(id, label, color, thr, max){
+  if (typeof Chart === "undefined"){ $(id).parentElement.style.display = "none"; return null; }   // CDN lỗi: web vẫn chạy, chỉ thiếu biểu đồ
+  const ctx = $(id).getContext("2d");
+  return new Chart(ctx, {
+    type:"line",
+    data:{ labels:[], datasets:[
+      { label, data:[], borderColor:color, borderWidth:2.5, tension:.35, pointRadius:0, pointHoverRadius:5, fill:true,
+        backgroundColor: c => {
+          const a = c.chart.chartArea; if (!a) return color + "33";
+          const g = ctx.createLinearGradient(0, a.top, 0, a.bottom);
+          g.addColorStop(0, color + "66"); g.addColorStop(1, color + "00"); return g;
+        } },
+      { label:"Ngưỡng", data:[], borderColor:css("--bad"), borderDash:[6,5], borderWidth:1.5, pointRadius:0, fill:false }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{ duration:500 }, interaction:{ intersect:false, mode:"index" },
+      plugins:{ legend:{ display:false } },
+      scales:{ x:{ ticks:{ maxTicksLimit:5, color:css("--mut") }, grid:{ display:false } },
+               y:{ suggestedMax:thr * 1.2, ticks:{ color:css("--mut") }, grid:{ color:css("--line") } } } }
+  });
+}
+const chartGas  = makeChart("#chartGas",  "Gas (ppm)", "#e08a1e", GAS_THR, GAS_MAX);
+const chartTemp = makeChart("#chartTemp", "Nhiệt độ (°C)", "#2f7fc4", TEMP_THR, TEMP_MAX);
+
+function push(chart, value, thr){
+  if (!chart) return;
+  const d = chart.data;
+  d.labels.push(clock());
+  d.datasets[0].data.push(value);
+  d.datasets[1].data.push(thr);
+  if (d.labels.length > 30){ d.labels.shift(); d.datasets.forEach(s => s.data.shift()); }
+  chart.update();
+}
+
+/* ---------- Xử lý dữ liệu (dùng chung cho MQTT và chế độ chạy thử) ---------- */
+function setConn(text, cls){
+  $("#connText").textContent = text;
+  $("#dot").className = "dot " + (cls || "");
+}
+
+function handleData(d){
+  document.querySelectorAll(".gas-value").forEach(e => animateNumber(e, d.gas, 0));
+  document.querySelectorAll(".temp-value").forEach(e => animateNumber(e, d.temp, 1));
+  document.querySelectorAll(".mode-value").forEach(e => { e.textContent = d.mode; e.classList.toggle("manual", d.mode === "MANUAL"); });
+  updateGauge("Gas", d.gas, GAS_MAX, GAS_THR, 0);
+  updateGauge("Temp", d.temp, TEMP_MAX, TEMP_THR, 1);
+  push(chartGas, d.gas, GAS_THR); push(chartTemp, d.temp, TEMP_THR);
+
+  const fan = !!d.fan, pump = !!d.pump, alarm = !!d.alarm;
+  if (state.fan  !== fan  && state.alarm !== null) logEvent(fan  ? "Quạt đã bật" : "Quạt đã tắt", fan ? "warn" : "");
+  if (state.pump !== pump && state.alarm !== null) logEvent(pump ? "Máy bơm đã bật" : "Máy bơm đã tắt", pump ? "warn" : "");
+  if (state.mode !== d.mode && state.mode !== null) logEvent("Chuyển sang chế độ " + d.mode);
+  if (state.alarm !== alarm){
+    if (state.alarm === null && !alarm) logEvent("Đã nhận dữ liệu đầu tiên - hệ thống an toàn", "ok");
+    else logEvent(alarm ? "CẢNH BÁO: vượt ngưỡng an toàn!" : "Đã trở lại trạng thái an toàn", alarm ? "bad" : "ok");
+  }
+  state.fan = fan; state.pump = pump; state.alarm = alarm; state.mode = d.mode;
+
+  $("#btnFan").textContent  = "Quạt: " + (fan ? "bật" : "tắt");
+  $("#btnPump").textContent = "Máy bơm: " + (pump ? "bật" : "tắt");
+  $("#btnFan").classList.toggle("on", fan);
+  $("#btnPump").classList.toggle("on", pump);
+  $("#devFan").classList.toggle("on", fan);   $("#fanState").textContent  = fan  ? "Đang chạy" : "Tắt";
+  $("#devPump").classList.toggle("on", pump); $("#pumpState").textContent = pump ? "Đang phun" : "Tắt";
+  $("#devBuzz").classList.toggle("on", alarm); $("#devBuzz").classList.toggle("alarm-on", alarm);
+  $("#buzzState").textContent = alarm ? "Đang kêu" : "Im lặng";
+
+  const b = $("#banner");
+  b.classList.remove("wait"); b.classList.toggle("alarm", alarm);
+  document.body.classList.toggle("alarm", alarm);
+  document.title = alarm ? "🔥 CẢNH BÁO CHÁY!" : "Báo cháy gia đình - Lab 3";
+  $("#stateText").textContent = alarm ? "Cảnh báo cháy" : "An toàn";
+  setConn("Cập nhật lúc " + clock(), "live");
+  $(".gas-value").classList.toggle("hot", d.gas > GAS_THR);
+  $(".temp-value").classList.toggle("hot", d.temp > TEMP_THR);
+}
+
+/* ---------- MQTT ---------- */
+let client = null;
+if (typeof mqtt !== "undefined"){
+  client = mqtt.connect(BROKER, { clientId: "web-" + Math.random().toString(16).slice(2) });
+  client.on("connect", () => {
+    setConn("Đã kết nối broker. Đang chờ ESP32 gửi dữ liệu…", "live");
+    client.subscribe(PREFIX + "/data");
+  });
+  client.on("close", () => { if (!demo) setConn("Mất kết nối broker, đang thử lại…", "off"); });
+  client.on("message", (topic, payload) => {
+    if (demo) return;
+    let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+    handleData(d);
+  });
+} else {
+  setConn("Không tải được thư viện MQTT (kiểm tra mạng)", "off");
+}
+
+const send = cmd => {
+  if (demo) return demo.command(cmd);
+  if (client) client.publish(PREFIX + "/cmd", cmd);
+};
+$("#btnFan").onclick  = () => send(state.fan  ? "FAN_OFF"  : "FAN_ON");
+$("#btnPump").onclick = () => send(state.pump ? "PUMP_OFF" : "PUMP_ON");
+$("#btnAuto").onclick = () => send("AUTO");
+
+/* ---------- Chế độ chạy thử: giả lập ESP32 để xem giao diện ---------- */
+function startDemo(){
+  const s = { gas:600, temp:28, tick:0, fanM:null, pumpM:null, timer:null };
+  const frame = () => {
+    s.tick++;
+    const phase = s.tick % 40;                       // chu kỳ ~80 giây: yên -> gas tăng -> nóng -> hạ nhiệt
+    const gTarget = phase > 8 && phase < 26 ? 2600 : 600;
+    const tTarget = phase > 14 && phase < 30 ? 58 : 28;
+    s.gas  += (gTarget - s.gas)  * .3 + (Math.random() - .5) * 120;
+    s.temp += (tTarget - s.temp) * .25 + (Math.random() - .5) * .6;
+    const gas = Math.round(Math.max(200, s.gas)), temp = s.temp;
+    const fan  = s.fanM  !== null ? s.fanM  : gas  > GAS_THR;
+    const pump = s.pumpM !== null ? s.pumpM : temp > TEMP_THR;
+    handleData({ gas, temp, fan, pump, alarm: gas > GAS_THR || temp > TEMP_THR, mode: (s.fanM !== null || s.pumpM !== null) ? "MANUAL" : "AUTO" });
+  };
+  return {
+    command(c){
+      if (c === "FAN_ON") s.fanM = true; else if (c === "FAN_OFF") s.fanM = false;
+      else if (c === "PUMP_ON") s.pumpM = true; else if (c === "PUMP_OFF") s.pumpM = false;
+      else if (c === "AUTO") s.fanM = s.pumpM = null;
+      frame();
+    },
+    start(){ frame(); s.timer = setInterval(frame, 2000); },
+    stop(){ clearInterval(s.timer); }
+  };
+}
+$("#btnDemo").onclick = () => {
+  if (demo){ demo.stop(); demo = null; $("#btnDemo").textContent = "Chạy thử (không cần ESP32)"; setConn("Đã tắt chế độ chạy thử. Đang chờ ESP32…", "live"); return; }
+  demo = startDemo(); demo.start();
+  logEvent("Bật chế độ chạy thử (dữ liệu giả lập)");
+  $("#btnDemo").textContent = "Dừng chạy thử";
+};
+if (new URLSearchParams(location.search).has("demo")) $("#btnDemo").click();
+</script>
+</body>
+</html>
