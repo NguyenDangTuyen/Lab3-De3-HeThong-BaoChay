@@ -1,6 +1,8 @@
 
 # LAB 3 - DE 3: HE THONG BAO CHAY GIA DINH
-
+ Thong tin sinh vien
+- Ho ten:Nguyễn Đăng Tuyển - 231432390
+- Lop:Kỹ sư thông tin và truyền thông
 ## 1. Gioi thieu
 He thong bao chay gia dinh su dung ESP32, cam bien MQ-2 va DS18B20.
 He thong doc du lieu cam bien, gui thong tin len MQTT Broker va hien thi tren Website.
