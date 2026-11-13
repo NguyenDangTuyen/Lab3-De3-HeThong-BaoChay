@@ -32,7 +32,7 @@ He thong doc du lieu cam bien, gui thong tin len MQTT Broker va hien thi tren We
 - index.html: Giao dien Website.
 
 ## 6. Lien ket Wokwi
-link project Wokwi : https://wokwi.com/projects/480583551666288641
-link WEB demo : https://nguyendangtuyen.github.io/Lab3-De3-HeThong-BaoChay/
+- link project Wokwi : https://wokwi.com/projects/480583551666288641
+- link WEB demo : https://nguyendangtuyen.github.io/Lab3-De3-HeThong-BaoChay/
 
 
