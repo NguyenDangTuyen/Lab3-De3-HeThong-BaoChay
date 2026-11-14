@@ -34,5 +34,10 @@ He thong doc du lieu cam bien, gui thong tin len MQTT Broker va hien thi tren We
 ## 6. Lien ket Wokwi
 - link project Wokwi : https://wokwi.com/projects/480583551666288641
 - link WEB demo : https://nguyendangtuyen.github.io/Lab3-De3-HeThong-BaoChay/
+- Link Video mô phỏng : 
+## 🎥 Video Demo
+
+[▶ Nhấn vào đây để xem video mô phỏng hệ thống báo cháy](https://raw.githubusercontent.com/NguyenDangTuyen/Lab3-De3-HeThong-BaoChay/main/LabV3.mp4)
+
 
 
